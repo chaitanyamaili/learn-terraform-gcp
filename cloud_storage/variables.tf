@@ -23,5 +23,5 @@ variable "bucket_name" {
 variable "region" {
   description   = "Google cloud region."
   type          = string
-  default       = "us-east1"
+  default       = "us-central1"
 }

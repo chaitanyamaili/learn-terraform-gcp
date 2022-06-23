@@ -1,11 +1,13 @@
 # Use Google-provided module to define a bucket
 provider "google" {
   project = var.project_id
+  version = "4.26.0"
 }
 
 # Use Google-provided module to define a bucket
 provider "google-beta" {
   project = var.project_id
+  version = "4.26.0"
 }
 
 # A 'decoupled-shared-sandbox' cloud storage bucket for backend LB.
@@ -57,13 +59,13 @@ resource "google_compute_backend_bucket" "load-balancer-bucket" {
 # Backend network end point (NEG)
 resource "google_compute_backend_service" "load-balancer-run-group" {
   name                            = "${var.load_balancer}-load-balancer-backend-service"
-  enable_cdn                      = true
+  enable_cdn                      = false
   timeout_sec                     = 10
   connection_draining_timeout_sec = 10
+  protocol                        = "HTTPS"
 
-  custom_request_headers  = ["host: ${google_compute_global_network_endpoint.proxy.fqdn}"]
-  custom_response_headers = ["X-Cache-Hit: {cdn_cache_status}"]
-
+  custom_request_headers  = ["Host: ${google_compute_global_network_endpoint.proxy.fqdn}"]
+  
   backend {
     group = google_compute_global_network_endpoint_group.external_proxy.id
   }
@@ -114,7 +116,7 @@ resource "google_compute_global_forwarding_rule" "static_http" {
   ip_address = google_compute_global_address.static-ip-address.id
 }
 
-# Managed SSL Certificates
+#Managed SSL Certificates
 resource "google_compute_managed_ssl_certificate" "load-balancer-certificate" {
   name    = "${var.load_balancer}-load-balancer-certificate"
   project = var.project_id
@@ -123,6 +125,42 @@ resource "google_compute_managed_ssl_certificate" "load-balancer-certificate" {
     domains = [var.load_balancer_domain]
   }
 }
+
+resource "google_compute_managed_ssl_certificate" "load-balancer-certificate2" {
+  name    = "${var.load_balancer}-load-balancer-certificate2"
+  project = var.project_id
+
+  managed {
+    domains = [var.load_balancer_domain, "site-service.project.${var.load_balancer_domain}"]
+  }
+}
+
+# resource "google_certificate_manager_certificate" "load-balancer-certificate" {
+#   name        = "${var.load_balancer}-load-balancer-dns-cert2"
+#   description = "The default cert"
+#   project = var.project_id
+#   #scope       = "EDGE_CACHE"
+#   managed {
+#     domains = [
+#       var.load_balancer_domain
+#     ]
+#     dns_authorizations = [
+#       google_certificate_manager_dns_authorization.load-balancer-certificate-instance.id
+#       # google_certificate_manager_dns_authorization.load-balancer-certificate-instance2.id
+#     ]
+#   }
+# }
+
+# resource "google_certificate_manager_dns_authorization" "load-balancer-certificate-instance" {
+#   name        = "${var.load_balancer}-load-balancer-dns-auth"
+#   description = "The default dnss"
+#   domain      = var.load_balancer_domain
+# }
+# resource "google_certificate_manager_dns_authorization" "load-balancer-certificate-instance2" {
+#   name        = "${var.load_balancer}-load-balancer-dns-auth2"
+#   description = "The default dnss"
+#   domain      = "site-service.project.${var.load_balancer_domain}"
+# }
 
 # Load balancer
 resource "google_compute_url_map" "load-balancer" {
@@ -136,19 +174,24 @@ resource "google_compute_url_map" "load-balancer" {
     path_matcher = "allpaths"
   }
 
+  host_rule {
+    hosts        = ["site-service.project.${var.load_balancer_domain}"]
+    path_matcher = "site-service"
+  }
+
   path_matcher {
     name            = "allpaths"
     default_service = google_compute_backend_bucket.load-balancer-bucket.id
 
     path_rule {
-      paths   = ["/site/*"]
-      service = google_compute_backend_bucket.load-balancer-bucket.id
-    }
-
-    path_rule {
       paths   = ["/cloud-run1/*"]
       service = google_compute_backend_service.load-balancer-run-group.id
     } 
+  }
+
+  path_matcher {
+    name            = "site-service"
+    default_service = google_compute_backend_service.load-balancer-run-group.id
   }
 }
 
@@ -157,7 +200,7 @@ resource "google_compute_target_https_proxy" "https-proxy" {
   project = var.project_id
 
   url_map          = google_compute_url_map.load-balancer.id
-  ssl_certificates = [google_compute_managed_ssl_certificate.load-balancer-certificate.id]
+  ssl_certificates = [google_compute_managed_ssl_certificate.load-balancer-certificate2.id]
 }
 
 resource "google_compute_target_http_proxy" "http-proxy" {

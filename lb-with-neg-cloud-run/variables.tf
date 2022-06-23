@@ -32,3 +32,12 @@ variable "load_balancer_domain" {
   description = "Domain name for the load balancer."
   type        = string
 }
+
+# variable "cloud_run_service" {
+#   description = "List of all cloud run services."
+#   type = object({
+#     service_name = string
+#     project = string
+#     location = string
+#   })  
+# }

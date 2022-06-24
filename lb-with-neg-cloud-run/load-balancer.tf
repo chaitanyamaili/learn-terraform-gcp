@@ -56,21 +56,38 @@ resource "google_compute_backend_bucket" "load-balancer-bucket" {
   bucket_name = module.cloud_storage_load_balancer.name
 }
 
-# Backend network end point (NEG)
-resource "google_compute_backend_service" "load-balancer-run-group" {
-  name                            = "${var.load_balancer}-load-balancer-backend-service"
+# Backend network end point group1 (NEG)
+resource "google_compute_backend_service" "load-balancer-run-service1" {
+  name                            = "${var.load_balancer}-load-balancer-backend-service1"
   enable_cdn                      = false
   timeout_sec                     = 10
   connection_draining_timeout_sec = 10
   protocol                        = "HTTPS"
 
-  custom_request_headers  = ["Host: ${google_compute_global_network_endpoint.proxy.fqdn}"]
+  custom_request_headers  = ["Host:${trimprefix(data.google_cloud_run_service.run_service1.status[0].url, "https://")}"]
   
   backend {
     group = google_compute_global_network_endpoint_group.external_proxy.id
   }
 }
 
+# Backend network end point group1 (NEG)
+resource "google_compute_backend_service" "load-balancer-run-service2" {
+  name                            = "${var.load_balancer}-load-balancer-backend-service2"
+  enable_cdn                      = false
+  timeout_sec                     = 10
+  connection_draining_timeout_sec = 10
+  protocol                        = "HTTPS"
+
+  custom_request_headers  = ["Host:${trimprefix(data.google_cloud_run_service.run_service2.status[0].url, "https://")}"]
+  
+  backend {
+    group = google_compute_global_network_endpoint_group.external_proxy.id
+  }
+}
+
+
+# NEG with Internet Cloud run
 resource "google_compute_global_network_endpoint_group" "external_proxy" {
   provider              = google-beta
   project               = var.project_id
@@ -83,10 +100,11 @@ resource "google_compute_global_network_endpoint" "proxy" {
   provider                      = google-beta
   project                       = var.project_id
   global_network_endpoint_group = google_compute_global_network_endpoint_group.external_proxy.id
-  fqdn                          = trimprefix(data.google_cloud_run_service.run_service.status[0].url  , "https://")
+  # fqdn                          = trimprefix(data.google_cloud_run_service.run_service.status[0].url  , "https://")
+  fqdn                          = "run.app"
   port                          = google_compute_global_network_endpoint_group.external_proxy.default_port
 }
-
+# NEG with Internet Cloud run
 
 # External IP Address for load balancer
 resource "google_compute_global_address" "static-ip-address" {
@@ -122,18 +140,22 @@ resource "google_compute_managed_ssl_certificate" "load-balancer-certificate" {
   project = var.project_id
 
   managed {
-    domains = [var.load_balancer_domain]
+    domains = [
+      var.load_balancer_domain, "site-service.project.${var.load_balancer_domain}", "api-gateway.project.${var.load_balancer_domain}"
+    ]
   }
 }
 
-resource "google_compute_managed_ssl_certificate" "load-balancer-certificate2" {
-  name    = "${var.load_balancer}-load-balancer-certificate2"
-  project = var.project_id
+# resource "google_compute_managed_ssl_certificate" "load-balancer-certificate2" {
+#   name    = "${var.load_balancer}-load-balancer-certificate2"
+#   project = var.project_id
 
-  managed {
-    domains = [var.load_balancer_domain, "site-service.project.${var.load_balancer_domain}"]
-  }
-}
+#   managed {
+#     domains = [
+#       var.load_balancer_domain, "site-service.project.${var.load_balancer_domain}", "api-gateway.project.${var.load_balancer_domain}"
+#     ]
+#   }
+# }
 
 # resource "google_certificate_manager_certificate" "load-balancer-certificate" {
 #   name        = "${var.load_balancer}-load-balancer-dns-cert2"
@@ -179,19 +201,29 @@ resource "google_compute_url_map" "load-balancer" {
     path_matcher = "site-service"
   }
 
+  host_rule {
+    hosts        = ["api-gateway.project.${var.load_balancer_domain}"]
+    path_matcher = "api-gateway"
+  }
+
   path_matcher {
     name            = "allpaths"
     default_service = google_compute_backend_bucket.load-balancer-bucket.id
 
-    path_rule {
-      paths   = ["/cloud-run1/*"]
-      service = google_compute_backend_service.load-balancer-run-group.id
-    } 
+    # path_rule {
+    #   paths   = ["/cloud-run1/*"]
+    #   service = google_compute_backend_service.load-balancer-run-group.id
+    # } 
   }
 
   path_matcher {
     name            = "site-service"
-    default_service = google_compute_backend_service.load-balancer-run-group.id
+    default_service = google_compute_backend_service.load-balancer-run-service1.id
+  }
+
+  path_matcher {
+    name            = "api-gateway"
+    default_service = google_compute_backend_service.load-balancer-run-service2.id
   }
 }
 
@@ -200,7 +232,7 @@ resource "google_compute_target_https_proxy" "https-proxy" {
   project = var.project_id
 
   url_map          = google_compute_url_map.load-balancer.id
-  ssl_certificates = [google_compute_managed_ssl_certificate.load-balancer-certificate2.id]
+  ssl_certificates = [google_compute_managed_ssl_certificate.load-balancer-certificate.id]
 }
 
 resource "google_compute_target_http_proxy" "http-proxy" {

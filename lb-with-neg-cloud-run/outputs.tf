@@ -1,11 +1,21 @@
-output "service_url" {
-  description = "Cloud run url"
-  value       = data.google_cloud_run_service.run_service.status[0].url
+output "service_url1" {
+  description = "Cloud run url1"
+  value       = data.google_cloud_run_service.run_service1.status[0].url
 }
 
-output "service_fqdn" {
-  description = "Cloud run url"
-  value       = trimprefix(data.google_cloud_run_service.run_service.status[0].url, "https://")
+output "service_fqdn1" {
+  description = "Cloud fqdn url1"
+  value       = trimprefix(data.google_cloud_run_service.run_service1.status[0].url, "https://")
+}
+
+output "service_url2" {
+  description = "Cloud run url2"
+  value       = data.google_cloud_run_service.run_service2.status[0].url
+}
+
+output "service_fqdn2" {
+  description = "Cloud fqdn url2"
+  value       = trimprefix(data.google_cloud_run_service.run_service2.status[0].url, "https://")
 }
 
 # output "record_name_to_insert" {

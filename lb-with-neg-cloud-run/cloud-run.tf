@@ -36,19 +36,9 @@ data "google_cloud_run_service" "run_service2" {
   location = "asia-south1"
 }
 
-# data "google_iam_policy" "noauth" {
-#   binding {
-#     role = "roles/run.invoker"
-#     members = [
-#       "allUsers",
-#     ]
-#   }
-# }
-
-# resource "google_cloud_run_service_iam_policy" "noauth" {
-#   location    = google_cloud_run_service.run_service.location
-#   project     = google_cloud_run_service.run_service.project
-#   service     = google_cloud_run_service.run_service.name
-
-#   policy_data = data.google_iam_policy.noauth.policy_data
-# }
+data "google_cloud_run_service" "run_service" {
+  count    = length(var.load_balancer_cloud_run_services)
+  name     = var.load_balancer_cloud_run_services[count.index].name
+  project  = var.load_balancer_cloud_run_services[count.index].project
+  location = var.load_balancer_cloud_run_services[count.index].location
+}

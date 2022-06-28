@@ -37,7 +37,6 @@ variable "load_balancer_cloud_run_services" {
   description = "List of all cloud run services."
   type = list(object({
     name     = string,
-    alias    = string,
     project  = string,
     location = string
   }))

@@ -1,13 +1,23 @@
 # Use Google-provided module to define a bucket
 provider "google" {
   project = var.project_id
-  # version = "4.26.0"
 }
 
 # Use Google-provided module to define a bucket
 provider "google-beta" {
   project = var.project_id
-  # version = "4.26.0"
+}
+
+# Get the data from cloud run.
+data "google_cloud_run_service" "run_service" {
+  count    = length(var.load_balancer_cloud_run_services)
+  name     = var.load_balancer_cloud_run_services[count.index].name
+  project  = var.load_balancer_cloud_run_services[count.index].project
+  location = var.load_balancer_cloud_run_services[count.index].location
+}
+
+locals {
+  domains = [for service_domain in var.load_balancer_cloud_run_services : "${service_domain.name}.${var.load_balancer_domain}"]
 }
 
 # A 'decoupled-shared-sandbox' cloud storage bucket for backend LB.
@@ -58,37 +68,44 @@ resource "google_compute_backend_bucket" "load-balancer-bucket" {
 
 # Backend network end point group1 (NEG)
 resource "google_compute_backend_service" "load-balancer-run-service" {
-  count                           = length(var.load_balancer_cloud_run_services)
-  name                            = "${var.load_balancer}-load-balancer-backend-service${count.index}"
-  enable_cdn                      = false
-  timeout_sec                     = 10
-  connection_draining_timeout_sec = 10
-  protocol                        = "HTTPS"
-
-  custom_request_headers = ["Host:${trimprefix(data.google_cloud_run_service.run_service[count.index].status[0].url, "https://")}"]
+  name       = "${var.load_balancer}-load-balancer-backend-service"
+  project    = var.project_id
+  enable_cdn = false
 
   backend {
-    group = google_compute_global_network_endpoint_group.external_proxy.id
+    group = google_compute_region_network_endpoint_group.cloudrun_neg.id
+  }
+}
+
+# NEG with Serverless Neg cloud run.
+resource "google_compute_region_network_endpoint_group" "cloudrun_neg" {
+  name                  = "${var.load_balancer}-cloudrun-neg"
+  project               = var.project_id
+  network_endpoint_type = "SERVERLESS"
+  region                = "us-central1"
+
+  cloud_run {
+    url_mask = "<service>.${var.load_balancer_domain}"
   }
 }
 
 # NEG with Internet Cloud run
-resource "google_compute_global_network_endpoint_group" "external_proxy" {
-  provider              = google-beta
-  project               = var.project_id
-  name                  = "${var.load_balancer}-network-endpoint"
-  network_endpoint_type = "INTERNET_FQDN_PORT"
-  default_port          = "443"
-}
+# resource "google_compute_global_network_endpoint_group" "external_proxy" {
+#   provider              = google-beta
+#   project               = var.project_id
+#   name                  = "${var.load_balancer}-network-endpoint"
+#   network_endpoint_type = "INTERNET_FQDN_PORT"
+#   default_port          = "443"
+# }
 
-resource "google_compute_global_network_endpoint" "proxy" {
-  provider                      = google-beta
-  project                       = var.project_id
-  global_network_endpoint_group = google_compute_global_network_endpoint_group.external_proxy.id
-  # fqdn                          = trimprefix(data.google_cloud_run_service.run_service.status[0].url  , "https://")
-  fqdn = "run.app"
-  port = google_compute_global_network_endpoint_group.external_proxy.default_port
-}
+# resource "google_compute_global_network_endpoint" "proxy" {
+#   provider                      = google-beta
+#   project                       = var.project_id
+#   global_network_endpoint_group = google_compute_global_network_endpoint_group.external_proxy.id
+#   # fqdn                          = trimprefix(data.google_cloud_run_service.run_service.status[0].url  , "https://")
+#   fqdn                          = "run.app"
+#   port                          = google_compute_global_network_endpoint_group.external_proxy.default_port
+# }
 # NEG with Internet Cloud run
 
 # External IP Address for load balancer
@@ -125,49 +142,12 @@ resource "google_compute_managed_ssl_certificate" "load-balancer-certificate" {
   project = var.project_id
 
   managed {
-    domains = [
-      var.load_balancer_domain, "site-service.project.${var.load_balancer_domain}", "api-gateway.project.${var.load_balancer_domain}"
-    ]
+    # domains = [
+    #   var.load_balancer_domain, "site-service.project.${var.load_balancer_domain}", "api-gateway.project.${var.load_balancer_domain}"
+    # ]
+    domains = concat([var.load_balancer_domain], local.domains)
   }
 }
-
-# resource "google_compute_managed_ssl_certificate" "load-balancer-certificate2" {
-#   name    = "${var.load_balancer}-load-balancer-certificate2"
-#   project = var.project_id
-
-#   managed {
-#     domains = [
-#       var.load_balancer_domain, "site-service.project.${var.load_balancer_domain}", "api-gateway.project.${var.load_balancer_domain}"
-#     ]
-#   }
-# }
-
-# resource "google_certificate_manager_certificate" "load-balancer-certificate" {
-#   name        = "${var.load_balancer}-load-balancer-dns-cert2"
-#   description = "The default cert"
-#   project = var.project_id
-#   #scope       = "EDGE_CACHE"
-#   managed {
-#     domains = [
-#       var.load_balancer_domain
-#     ]
-#     dns_authorizations = [
-#       google_certificate_manager_dns_authorization.load-balancer-certificate-instance.id
-#       # google_certificate_manager_dns_authorization.load-balancer-certificate-instance2.id
-#     ]
-#   }
-# }
-
-# resource "google_certificate_manager_dns_authorization" "load-balancer-certificate-instance" {
-#   name        = "${var.load_balancer}-load-balancer-dns-auth"
-#   description = "The default dnss"
-#   domain      = var.load_balancer_domain
-# }
-# resource "google_certificate_manager_dns_authorization" "load-balancer-certificate-instance2" {
-#   name        = "${var.load_balancer}-load-balancer-dns-auth2"
-#   description = "The default dnss"
-#   domain      = "site-service.project.${var.load_balancer_domain}"
-# }
 
 # Load balancer
 resource "google_compute_url_map" "load-balancer" {
@@ -176,23 +156,23 @@ resource "google_compute_url_map" "load-balancer" {
 
   default_service = google_compute_backend_bucket.load-balancer-bucket.id
 
-  # host_rule {
-  #   hosts        = ["/*"]
-  #   path_matcher = "allpaths"
-  # }
-
-  # path_matcher {
-  #   name            = "allpaths"
-  #   default_service = google_compute_backend_bucket.load-balancer-bucket.id
-  # }
+  host_rule {
+    hosts        = ["*"]
+    path_matcher = "allpaths"
+  }
 
   dynamic "host_rule" {
     # for_each = { for o in var.load_balancer_cloud_run_services : o.name => o }
     for_each = var.load_balancer_cloud_run_services
     content {
-      hosts        = ["${host_rule.value.alias}.project.${var.load_balancer_domain}"]
-      path_matcher = host_rule.value.alias
+      hosts        = ["${host_rule.value.name}.${var.load_balancer_domain}"]
+      path_matcher = host_rule.value.name
     }
+  }
+
+  path_matcher {
+    name            = "allpaths"
+    default_service = google_compute_backend_bucket.load-balancer-bucket.id
   }
 
   dynamic "path_matcher" {
@@ -200,8 +180,8 @@ resource "google_compute_url_map" "load-balancer" {
     for_each = var.load_balancer_cloud_run_services
     # iterator = "load-balancer-backend-service"
     content {
-      name            = path_matcher.value.alias
-      default_service = google_compute_backend_service.load-balancer-run-service[path_matcher.key].id
+      name            = path_matcher.value.name
+      default_service = google_compute_backend_service.load-balancer-run-service.id
     }
   }
 }

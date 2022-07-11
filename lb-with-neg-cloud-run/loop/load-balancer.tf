@@ -17,7 +17,8 @@ data "google_cloud_run_service" "run_service" {
 }
 
 locals {
-    domains = [for service_domain in var.load_balancer_cloud_run_services : "${service_domain.name}.${var.load_balancer_domain}"]
+  domains             = [for service_domain in var.load_balancer_cloud_run_services : "${service_domain.name}.${var.load_balancer_domain}"]
+  load_balancer_count = var.load_balancer != "" ? 1 : 0
   # domains = concat([var.load_balancer_domain], [for service_domain in var.load_balancer_cloud_run_services : "${service_domain.name}.${var.load_balancer_domain}"])
 }
 
@@ -26,6 +27,7 @@ locals {
 module "cloud_storage_load_balancer" {
   source  = "terraform-google-modules/cloud-storage/google"
   version = "~> 3.2"
+  count   = local.load_balancer_count
 
   project_id = var.project_id
   prefix     = var.prefix
@@ -52,34 +54,38 @@ module "cloud_storage_load_balancer" {
 # create the index and error page content
 resource "google_storage_bucket_object" "index_page" {
   name    = "index.html"
+  count   = local.load_balancer_count
   content = "Welcome to static website!!"
-  bucket  = module.cloud_storage_load_balancer.name
+  bucket  = module.cloud_storage_load_balancer[count.index].name
 }
 # TO DELETE
 
 # Load balancer configurations
 # Backend bucket
 resource "google_compute_backend_bucket" "load-balancer-bucket" {
+  count   = local.load_balancer_count
   name    = "${var.load_balancer}-load-balancer-bucket"
   project = var.project_id
 
   description = "Create the bucket backend for load balancer to use."
-  bucket_name = module.cloud_storage_load_balancer.name
+  bucket_name = module.cloud_storage_load_balancer[count.index].name
 }
 
 # Backend network end point group1 (NEG)
 resource "google_compute_backend_service" "load-balancer-run-service" {
+  count      = local.load_balancer_count
   name       = "${var.load_balancer}-load-balancer-backend-service"
   project    = var.project_id
   enable_cdn = false
 
   backend {
-    group = google_compute_region_network_endpoint_group.cloudrun_neg.id
+    group = google_compute_region_network_endpoint_group.cloudrun_neg[count.index].id
   }
 }
 
 # NEG with Serverless Neg cloud run.
 resource "google_compute_region_network_endpoint_group" "cloudrun_neg" {
+  count                 = local.load_balancer_count
   name                  = "${var.load_balancer}-cloudrun-neg"
   project               = var.project_id
   network_endpoint_type = "SERVERLESS"
@@ -111,6 +117,7 @@ resource "google_compute_region_network_endpoint_group" "cloudrun_neg" {
 
 # External IP Address for load balancer
 resource "google_compute_global_address" "static-ip-address" {
+  count   = local.load_balancer_count
   name    = "${var.load_balancer}-static-ip"
   project = var.project_id
 
@@ -118,23 +125,25 @@ resource "google_compute_global_address" "static-ip-address" {
 }
 
 resource "google_compute_global_forwarding_rule" "https-rule" {
+  count   = local.load_balancer_count
   name    = "${var.load_balancer}-https-proxy-rule"
   project = var.project_id
 
-  target     = google_compute_target_https_proxy.https-proxy.id
+  target     = google_compute_target_https_proxy.https-proxy[count.index].id
   port_range = "443"
 
-  ip_address = google_compute_global_address.static-ip-address.id
+  ip_address = google_compute_global_address.static-ip-address[count.index].id
 }
 
 resource "google_compute_global_forwarding_rule" "static_http" {
+  count   = local.load_balancer_count
   name    = "${var.load_balancer}-http-proxy-rule"
   project = var.project_id
 
-  target     = google_compute_target_http_proxy.http-proxy.id
+  target     = google_compute_target_http_proxy.http-proxy[count.index].id
   port_range = "80"
 
-  ip_address = google_compute_global_address.static-ip-address.id
+  ip_address = google_compute_global_address.static-ip-address[count.index].id
 }
 
 # Random id for managed certificate.
@@ -149,6 +158,7 @@ resource "random_id" "certificate" {
 
 #Managed SSL Certificates
 resource "google_compute_managed_ssl_certificate" "load-balancer-certificate" {
+  count   = local.load_balancer_count
   name    = random_id.certificate.hex
   project = var.project_id
 
@@ -172,7 +182,7 @@ resource "google_compute_managed_ssl_certificate" "load-balancer-certificate" {
 #   #scope       = "EDGE_CACHE"
 #   managed {
 #     domains = local.domains
-    
+
 #     dns_authorizations = [for k, d in local.domains : google_certificate_manager_dns_authorization.load-balancer-certificate-instance[k].id]
 #     # dns_authorizations = [
 #     #   google_certificate_manager_dns_authorization.load-balancer-certificate-instance.id
@@ -190,10 +200,11 @@ resource "google_compute_managed_ssl_certificate" "load-balancer-certificate" {
 
 # Load balancer
 resource "google_compute_url_map" "load-balancer" {
+  count   = local.load_balancer_count
   name    = "${var.load_balancer}-load-balancer"
   project = var.project_id
 
-  default_service = google_compute_backend_bucket.load-balancer-bucket.id
+  default_service = google_compute_backend_bucket.load-balancer-bucket[count.index].id
 
   host_rule {
     hosts        = ["*"]
@@ -211,7 +222,7 @@ resource "google_compute_url_map" "load-balancer" {
 
   path_matcher {
     name            = "allpaths"
-    default_service = google_compute_backend_bucket.load-balancer-bucket.id
+    default_service = google_compute_backend_bucket.load-balancer-bucket[count.index].id
   }
 
   dynamic "path_matcher" {
@@ -220,25 +231,27 @@ resource "google_compute_url_map" "load-balancer" {
     # iterator = "load-balancer-backend-service"
     content {
       name            = path_matcher.value.name
-      default_service = google_compute_backend_service.load-balancer-run-service.id
+      default_service = google_compute_backend_service.load-balancer-run-service[count.index].id
     }
   }
 }
 
 resource "google_compute_target_https_proxy" "https-proxy" {
+  count   = local.load_balancer_count
   name    = "${var.load_balancer}-https-proxy"
   project = var.project_id
 
-  url_map          = google_compute_url_map.load-balancer.id
-  ssl_certificates = [google_compute_managed_ssl_certificate.load-balancer-certificate.id]
+  url_map          = google_compute_url_map.load-balancer[count.index].id
+  ssl_certificates = [google_compute_managed_ssl_certificate.load-balancer-certificate[count.index].id]
   # ssl_certificates = [google_certificate_manager_certificate.load-balancer-certificate.id]
 }
 
 resource "google_compute_target_http_proxy" "http-proxy" {
+  count   = local.load_balancer_count
   name    = "${var.load_balancer}-http-proxy"
   project = var.project_id
 
-  url_map = google_compute_url_map.load-balancer.id
+  url_map = google_compute_url_map.load-balancer[count.index].id
 }
 
 # Create the DNS entry.

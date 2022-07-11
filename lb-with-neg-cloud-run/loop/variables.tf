@@ -21,16 +21,19 @@ variable "location" {
 variable "load_balancer_storage" {
   description = "GCS Bucket name for load balancer default backend"
   type        = string
+  default     = ""
 }
 
 variable "load_balancer" {
   description = "Name for the load balancer."
   type        = string
+  default     = ""
 }
 
 variable "load_balancer_domain" {
   description = "Domain name for the load balancer."
   type        = string
+  default     = ""
 }
 
 variable "load_balancer_cloud_run_services" {
@@ -40,4 +43,5 @@ variable "load_balancer_cloud_run_services" {
     project  = string,
     location = string
   }))
+  default = []
 }

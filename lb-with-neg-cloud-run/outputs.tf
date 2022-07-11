@@ -17,8 +17,3 @@ output "service_fqdn2" {
   description = "Cloud fqdn url2"
   value       = trimprefix(data.google_cloud_run_service.run_service[1].status[0].url, "https://")
 }
-
-output "local_domain" {
-  description = "Local domains as list"
-  value       = local.domains
-}

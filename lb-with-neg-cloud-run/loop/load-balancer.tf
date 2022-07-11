@@ -17,7 +17,8 @@ data "google_cloud_run_service" "run_service" {
 }
 
 locals {
-  domains = [for service_domain in var.load_balancer_cloud_run_services : "${service_domain.name}.${var.load_balancer_domain}"]
+    domains = [for service_domain in var.load_balancer_cloud_run_services : "${service_domain.name}.${var.load_balancer_domain}"]
+  # domains = concat([var.load_balancer_domain], [for service_domain in var.load_balancer_cloud_run_services : "${service_domain.name}.${var.load_balancer_domain}"])
 }
 
 # A 'decoupled-shared-sandbox' cloud storage bucket for backend LB.
@@ -136,9 +137,19 @@ resource "google_compute_global_forwarding_rule" "static_http" {
   ip_address = google_compute_global_address.static-ip-address.id
 }
 
+# Random id for managed certificate.
+resource "random_id" "certificate" {
+  byte_length = 4
+  prefix      = "${var.load_balancer}-load-balancer-certificate-"
+
+  keepers = {
+    domains = join(",", local.domains)
+  }
+}
+
 #Managed SSL Certificates
 resource "google_compute_managed_ssl_certificate" "load-balancer-certificate" {
-  name    = "${var.load_balancer}-load-balancer-certificate"
+  name    = random_id.certificate.hex
   project = var.project_id
 
   managed {
@@ -147,7 +158,35 @@ resource "google_compute_managed_ssl_certificate" "load-balancer-certificate" {
     # ]
     domains = concat([var.load_balancer_domain], local.domains)
   }
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
+
+# Managed certificate with wild card.
+# resource "google_certificate_manager_certificate" "load-balancer-certificate" {
+#   name        = "${var.load_balancer}-load-balancer-dns-cert2"
+#   description = "The default cert"
+#   project = var.project_id
+#   #scope       = "EDGE_CACHE"
+#   managed {
+#     domains = local.domains
+    
+#     dns_authorizations = [for k, d in local.domains : google_certificate_manager_dns_authorization.load-balancer-certificate-instance[k].id]
+#     # dns_authorizations = [
+#     #   google_certificate_manager_dns_authorization.load-balancer-certificate-instance.id
+#     # ]
+#   }
+# }
+
+# resource "google_certificate_manager_dns_authorization" "load-balancer-certificate-instance" {
+#   count = length(local.domains)
+#   name        = "${var.load_balancer}-load-balancer-dns-auth-${count.index}"
+#   description = "The default dnss"
+#   domain      = local.domains[count.index]
+# }
+# Managed certificate with wild card.
 
 # Load balancer
 resource "google_compute_url_map" "load-balancer" {
@@ -192,6 +231,7 @@ resource "google_compute_target_https_proxy" "https-proxy" {
 
   url_map          = google_compute_url_map.load-balancer.id
   ssl_certificates = [google_compute_managed_ssl_certificate.load-balancer-certificate.id]
+  # ssl_certificates = [google_certificate_manager_certificate.load-balancer-certificate.id]
 }
 
 resource "google_compute_target_http_proxy" "http-proxy" {
@@ -200,3 +240,6 @@ resource "google_compute_target_http_proxy" "http-proxy" {
 
   url_map = google_compute_url_map.load-balancer.id
 }
+
+# Create the DNS entry.
+
